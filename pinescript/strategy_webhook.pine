@@ -1,0 +1,20 @@
+//@version=5
+strategy("ChartGPT Tesla Signal", overlay=true)
+
+// Inputs
+rsiLength = input.int(14, title="RSI Length")
+emaFast = ta.ema(close, 9)
+emaSlow = ta.ema(close, 21)
+rsi = ta.rsi(close, rsiLength)
+basis = ta.sma(close, 20)
+dev = 2.0
+upper = basis + dev * ta.stdev(close, 20)
+lower = basis - dev * ta.stdev(close, 20)
+macdLine = ta.ema(close, 12) - ta.ema(close, 26)
+signalLine = ta.ema(macdLine, 9)
+macdHist = macdLine - signalLine
+
+// Webhook alert condition
+if bar_index % 1 == 0
+    strategy.entry("Track", strategy.long)
+    alert("TESLA|" + str.tostring(close) + "|" + str.tostring(rsi) + "|" + str.tostring(emaFast) + "|" + str.tostring(emaSlow) + "|" + str.tostring(basis) + "|" + str.tostring(macdHist), alert.freq_once_per_bar)
