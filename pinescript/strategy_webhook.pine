@@ -1,20 +1,79 @@
 //@version=5
-strategy("ChartGPT Tesla Signal", overlay=true)
+strategy("ChartGPT Enhanced Signal", overlay=true)
 
-// Inputs
+// Technical Indicators
 rsiLength = input.int(14, title="RSI Length")
-emaFast = ta.ema(close, 9)
-emaSlow = ta.ema(close, 21)
 rsi = ta.rsi(close, rsiLength)
-basis = ta.sma(close, 20)
-dev = 2.0
-upper = basis + dev * ta.stdev(close, 20)
-lower = basis - dev * ta.stdev(close, 20)
-macdLine = ta.ema(close, 12) - ta.ema(close, 26)
-signalLine = ta.ema(macdLine, 9)
-macdHist = macdLine - signalLine
 
-// Webhook alert condition
-if bar_index % 1 == 0
+// EMAs
+ema9 = ta.ema(close, 9)
+ema21 = ta.ema(close, 21)
+
+// VWAP
+vwap = ta.vwap(hlc3)
+
+// Bollinger Bands
+bb_length = 20
+bb_mult = 2.0
+bb_basis = ta.sma(close, bb_length)
+bb_dev = bb_mult * ta.stdev(close, bb_length)
+bb_upper = bb_basis + bb_dev
+bb_lower = bb_basis - bb_dev
+bb_width = bb_upper - bb_lower
+
+// MACD
+[macd_line, signal_line, macd_hist] = ta.macd(close, 12, 26, 9)
+
+// Volume Oscillator (simplified)
+vol_sma = ta.sma(volume, 20)
+volume_osc = volume / vol_sma
+
+// ATR
+atr = ta.atr(14)
+
+// Session Range (daily high - low)
+session_high = request.security(syminfo.tickerid, "1D", high)
+session_low = request.security(syminfo.tickerid, "1D", low)
+session_range = session_high - session_low
+
+// Previous candles data
+c1_open = open[1]
+c1_high = high[1] 
+c1_low = low[1]
+c1_close = close[1]
+
+c2_open = open[2]
+c2_high = high[2]
+c2_low = low[2] 
+c2_close = close[2]
+
+c3_open = open[3]
+c3_high = high[3]
+c3_low = low[3]
+c3_close = close[3]
+
+// Create JSON payload
+create_json_payload() =>
+    payload = '{'
+    payload := payload + '"price":' + str.tostring(close) + ','
+    payload := payload + '"rsi":' + str.tostring(rsi) + ','
+    payload := payload + '"ema9":' + str.tostring(ema9) + ','
+    payload := payload + '"ema21":' + str.tostring(ema21) + ','
+    payload := payload + '"vwap":' + str.tostring(vwap) + ','
+    payload := payload + '"bb_mid":' + str.tostring(bb_basis) + ','
+    payload := payload + '"macd_hist":' + str.tostring(macd_hist) + ','
+    payload := payload + '"volume_osc":' + str.tostring(volume_osc) + ','
+    payload := payload + '"atr":' + str.tostring(atr) + ','
+    payload := payload + '"bb_width":' + str.tostring(bb_width) + ','
+    payload := payload + '"session_range":' + str.tostring(session_range) + ','
+    payload := payload + '"candle_1":{"open":' + str.tostring(c1_open) + ',"high":' + str.tostring(c1_high) + ',"low":' + str.tostring(c1_low) + ',"close":' + str.tostring(c1_close) + '},'
+    payload := payload + '"candle_2":{"open":' + str.tostring(c2_open) + ',"high":' + str.tostring(c2_high) + ',"low":' + str.tostring(c2_low) + ',"close":' + str.tostring(c2_close) + '},'
+    payload := payload + '"candle_3":{"open":' + str.tostring(c3_open) + ',"high":' + str.tostring(c3_high) + ',"low":' + str.tostring(c3_low) + ',"close":' + str.tostring(c3_close) + '}'
+    payload := payload + '}'
+    payload
+
+// Send webhook alert every bar
+if barstate.isconfirmed
+    json_payload = create_json_payload()
     strategy.entry("Track", strategy.long)
-    alert("TESLA|" + str.tostring(close) + "|" + str.tostring(rsi) + "|" + str.tostring(emaFast) + "|" + str.tostring(emaSlow) + "|" + str.tostring(basis) + "|" + str.tostring(macdHist), alert.freq_once_per_bar)
+    alert(json_payload, alert.freq_once_per_bar)
