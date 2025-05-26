@@ -1,0 +1,399 @@
+//@version=5
+indicator("SMC Suite Enhanced Webhooks [Final]", overlay=true,
+     max_labels_count=500, max_lines_count=500, max_boxes_count=500, max_bars_back=500)
+
+// === INPUTS ===
+bullC          = input.color(#14D990, "Bull Color", group="Smart Money Concepts")
+bearC          = input.color(#F24968, "Bear Color", group="Smart Money Concepts")
+showInt        = input.bool(true, "Show Internals", group="Smart Money Concepts")
+intSens        = input.int(3, "Internals Sensitivity", options=[3,5,8], group="Smart Money Concepts")
+intStru        = input.string("All", "Internal Structure", options=["All","BoS","CHoCH"], group="Smart Money Concepts")
+showExt        = input.bool(true, "Show Externals", group="Smart Money Concepts")
+extSens        = input.int(25, "Externals Sensitivity", options=[10,25,50], group="Smart Money Concepts")
+extStru        = input.string("All", "External Structure", options=["All","BoS","CHoCH"], group="Smart Money Concepts")
+showOB         = input.bool(true, "Show Order Blocks", group="Webhook Settings")
+maxOBs         = input.int(10, "Max Order Blocks", minval=0, group="Webhook Settings")
+showFVG        = input.bool(true, "Show Fair Value Gaps", group="Webhook Settings")
+contract       = input.bool(false, "Contract Violated FVG", group="FVG")
+closeOnly      = input.bool(false, "Closest Up/Down FVG Only", group="FVG")
+fvgcol         = input.color(#F2B807, "FVG Color", group="FVG")
+fvgtra         = input.int(80, "FVG Transparency", minval=0, maxval=100, group="FVG")
+show1D         = input.bool(true, "Show Prev Day High/Low", group="Key Levels")
+show4H         = input.bool(true, "Show 4H High/Low", group="Key Levels")
+enableWebhooks = input.bool(true, "Enable Webhooks", group="Webhook Settings")
+webhookFreq    = input.string("once_per_bar_close", "Webhook Frequency", options=["once_per_bar","once_per_bar_close"], group="Webhook Settings")
+deBounceBars   = input.int(2, "Debounce Bars", group="Webhook Settings")
+minDistance    = input.float(0.1, "Min Distance % for Key Levels", step=0.1, group="Webhook Settings")
+
+// === GLOBAL STATE ===
+var map<string,int> lastSent       = map.new<string,int>()
+var string         lastSignalName = "None"
+var float[]        highArr         = array.new_float()
+var float[]        lowArr          = array.new_float()
+var int[]          timeArr         = array.new_int()
+var float[]        volArr          = array.new_float()
+var float[]        closeArr        = array.new_float()
+var float[]        openArr         = array.new_float()
+var box[]          highBlock       = array.new_box()
+var box[]          lowBlock        = array.new_box()
+var box[]          fvgDrawings     = array.new_box()
+var map<string,float> bigData      = map.new<string,float>()
+var map<string,float> smallData    = map.new<string,float>()
+
+// Initialize pivot state
+if map.size(bigData) == 0
+    map.put(bigData, "moving", 0)
+    map.put(bigData, "upside", 1)
+    map.put(bigData, "downside", 1)
+    map.put(bigData, "upaxis", 0)
+    map.put(bigData, "upaxis2", 0)
+    map.put(bigData, "dnaxis", 0)
+    map.put(bigData, "dnaxis2", 0)
+
+if map.size(smallData) == 0
+    map.put(smallData, "moving", 0)
+    map.put(smallData, "upside", 1)
+    map.put(smallData, "downside", 1)
+    map.put(smallData, "upaxis", 0)
+    map.put(smallData, "upaxis2", 0)
+    map.put(smallData, "dnaxis", 0)
+    map.put(smallData, "dnaxis2", 0)
+
+if array.size(highArr) > 200
+    map.put(smallData,"moving",0), map.put(smallData,"upside",1), map.put(smallData,"downside",1)
+    map.put(smallData,"upaxis",0), map.put(smallData,"upaxis2",0)
+    map.put(smallData,"dnaxis",0), map.put(smallData,"dnaxis2",0)
+
+// === DATA FEED ===
+array.unshift(highArr, high), array.unshift(lowArr, low), array.unshift(timeArr, time)
+array.unshift(volArr, volume), array.unshift(closeArr, close), array.unshift(openArr, open)
+if array.size(highArr) > 200
+    for i = 0 to 5
+        array.pop(highArr), array.pop(lowArr), array.pop(timeArr)
+        array.pop(volArr), array.pop(closeArr), array.pop(openArr)
+
+// Daily pivots
+[pdHigh, pdLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_off)
+// 4H levels
+r4 = math.floor(timeframe.in_seconds("240")/timeframe.in_seconds(timeframe.period))
+get4H() =>
+    float h4h=0, float h4l=1e10
+    if array.size(highArr)>r4
+        for i=0 to r4-1
+            h4h := math.max(h4h, array.get(highArr,i))
+            h4l := math.min(h4l, array.get(lowArr ,i))
+    [h4h, h4l]
+[h4High,h4Low] = get4H()
+
+// Context
+atr = ta.atr(14)
+volumeRatio = volume/ta.sma(volume,20)
+getSession() =>
+    h = hour(time, "GMT+0")
+    if (h>=13 and h<20) or (h==20 and minute(time)==0)
+        "NY"
+    else if h>=2 and h<10
+        "LON"
+    else if h>=20 or h<2
+        "ASIA"
+    else
+        "DZ"
+session = getSession()
+
+shouldSend(sig) =>
+    not map.contains(lastSent, sig) or (bar_index - map.get(lastSent,sig) >= deBounceBars)
+
+// === MISSING FUNCTION - DRAW CHARACTER ===
+drawChar(barIndex, price, txt, col, isBull) =>
+    if showExt or showInt
+        label.new(barIndex, price, txt, 
+                  color=color.new(col, 0), 
+                  textcolor=color.white, 
+                  style=isBull ? label.style_label_up : label.style_label_down,
+                  size=size.small)
+
+// === SEND EVENT ===
+sendEvt(sig, price, evData) =>
+    var bool fired = false
+    if enableWebhooks and shouldSend(sig)
+        // Simplified JSON structure to stay under 4096 character limit
+        typ = str.contains(sig, "OB_")?"OB": str.contains(sig, "FVG_")?"FVG": str.contains(sig, "KEY_")?"KEY":"STR"
+        dir = str.contains(evData, "bull") or str.contains(evData, "above")?"B": str.contains(evData, "bear") or str.contains(evData, "below")?"S":"N"
+        act = str.contains(sig, "_CREATED")?"C": str.contains(sig, "_MITIGATED")?"M": str.contains(sig, "BoS")?"BOS":"CHoCH"
+        
+        // Compact JSON
+        json = '{"sym":"'+syminfo.ticker+'","ts":'+str.tostring(time)+',"tf":"'+timeframe.period+'","price":'+str.tostring(price,'#.####')+',"sig":"'+sig+'","type":"'+typ+'","dir":"'+dir+'","act":"'+act+'","sess":"'+session+'","vol":'+str.tostring(volumeRatio,'#.#')+',"pdh":'+str.tostring(pdHigh,'#.####')+',"pdl":'+str.tostring(pdLow,'#.####')+',"h4h":'+str.tostring(h4High,'#.####')+',"h4l":'+str.tostring(h4Low,'#.####')+',"obs":'+str.tostring(array.size(highBlock)+array.size(lowBlock))+',"fvgs":'+str.tostring(array.size(fvgDrawings))+'}'
+        
+        freq = webhookFreq=="once_per_bar"?alert.freq_once_per_bar:alert.freq_once_per_bar_close
+        alert(json, freq)
+        map.put(lastSent, sig, bar_index)
+        fired := true
+    fired
+
+// === PIVOT CALCULATION ===
+calculatePivots(n) =>
+    var int st = 0
+    if bar_index>n and array.size(highArr)>n and array.size(lowArr)>n
+        up = array.max(array.slice(highArr,0,n))
+        dn = array.min(array.slice(lowArr ,0,n))
+        cH= array.get(highArr,n), cL=array.get(lowArr,n)
+        st := cH>up?0: cL<dn?1: st[1]
+        top = (st==0 and st[1]!=0)?cH:na
+        bot = (st==1 and st[1]!=1)?cL:na
+        [top,bot]
+    else
+        [na,na]
+[bigUpper,bigLower]     = calculatePivots(extSens)
+[smallUpper,smallLower] = calculatePivots(intSens)
+
+// === ORDER BLOCK CREATION ===
+createOB(isBull, price, barIndex) =>
+    // returns true if OB created & webhook fired
+    var bool fired = false
+    if showOB
+        // Calculate box coordinates
+        topPrice = isBull ? price : price + atr * 0.2
+        bottomPrice = isBull ? price - atr * 0.2 : price
+        borderCol = isBull ? color.new(color.blue, 75) : color.new(color.red, 75)
+        bgCol = isBull ? color.new(color.blue, 95) : color.new(color.red, 95)
+        
+        // Create box
+        b = box.new(barIndex, topPrice, last_bar_index + 5, bottomPrice, border_color=borderCol, bgcolor=bgCol)
+        
+        // Store in appropriate array
+        if isBull
+            array.unshift(lowBlock, b)
+        else
+            array.unshift(highBlock, b)
+            
+        // Manage max OBs
+        total = array.size(highBlock) + array.size(lowBlock)
+        if total > maxOBs and maxOBs > 0
+            if isBull and array.size(lowBlock) > maxOBs/2
+                oldBox = array.pop(lowBlock)
+                box.delete(oldBox)
+            else if not isBull and array.size(highBlock) > maxOBs/2
+                oldBox = array.pop(highBlock)
+                box.delete(oldBox)
+        
+        // Send creation event with specific OB type
+        obType = isBull ? "OB_BULL_CREATED" : "OB_BEAR_CREATED"
+        ev = '{"type":"' + (isBull ? "bull" : "bear") + '","level":' + str.tostring(price,'#.#####') + '}'
+        if sendEvt(obType, close, ev)
+            fired := true
+    fired
+
+// === STRUCTURE DETECTION ===
+// External
+if not na(bigUpper)
+    map.put(bigData, "upside", 1)
+    map.put(bigData, "upaxis", bigUpper)
+    map.put(bigData, "upaxis2", bar_index - extSens)
+    map.put(bigData, "moving", 1)
+    // create OB and track signal outside function
+    if createOB(false, bigUpper, bar_index - extSens)
+        lastSignalName := "OB_BEAR_CREATED"
+
+if not na(bigLower)
+    map.put(bigData, "downside", 1)
+    map.put(bigData, "dnaxis", bigLower)
+    map.put(bigData, "dnaxis2", bar_index - extSens)
+    map.put(bigData, "moving", -1)
+    // create OB and track signal
+    if createOB(true, bigLower, bar_index - extSens)
+        lastSignalName := "OB_BULL_CREATED"
+
+if showExt and map.get(bigData,"upside")==1 and ta.crossover(close,map.get(bigData,"upaxis"))
+    sig = map.get(bigData,"moving")==1?"BoS":"CHoCH"
+    if extStru=="All" or extStru==sig
+        drawChar(int(map.get(bigData,"upaxis2")),map.get(bigData,"upaxis"),sig,bullC,true)
+        ev = '{"direction":"bullish","type":"external"}'
+        if sendEvt(sig, close, ev)
+            lastSignalName := sig
+    map.put(bigData,"upside",0)
+    
+if showExt and map.get(bigData,"downside")==1 and ta.crossunder(close,map.get(bigData,"dnaxis"))
+    sig = map.get(bigData,"moving")==-1?"BoS":"CHoCH"
+    if extStru=="All" or extStru==sig
+        drawChar(int(map.get(bigData,"dnaxis2")),map.get(bigData,"dnaxis"),sig,bearC,false)
+        ev = '{"direction":"bearish","type":"external"}'
+        if sendEvt(sig, close, ev)
+            lastSignalName := sig
+    map.put(bigData,"downside",0)
+
+// Internal
+if showInt and not na(smallUpper)
+    map.put(smallData,"upside",1), map.put(smallData,"upaxis",smallUpper), map.put(smallData,"upaxis2",bar_index-intSens)
+    map.put(smallData,"moving",1)
+if showInt and not na(smallLower)
+    map.put(smallData,"downside",1), map.put(smallData,"dnaxis",smallLower), map.put(smallData,"dnaxis2",bar_index-intSens)
+    map.put(smallData,"moving",-1)
+if showInt and ta.crossover(close,map.get(smallData,"upaxis")) and map.get(smallData,"upside")==1
+    sig = map.get(smallData,"moving")==1?"I-BoS":"I-CHoCH"
+    if intStru=="All" or str.contains(intStru,str.replace(sig,"I-",""))
+        drawChar(int(map.get(smallData,"upaxis2")),map.get(smallData,"upaxis"),sig,bullC,true)
+        ev = '{"direction":"bullish","type":"internal"}'
+        if sendEvt(sig, close, ev)
+            lastSignalName := sig
+    map.put(smallData,"upside",0)
+if showInt and ta.crossunder(close,map.get(smallData,"dnaxis")) and map.get(smallData,"downside")==1
+    sig = map.get(smallData,"moving")==-1?"I-BoS":"I-CHoCH"
+    if intStru=="All" or str.contains(intStru,str.replace(sig,"I-",""))
+        drawChar(int(map.get(smallData,"dnaxis2")),map.get(smallData,"dnaxis"),sig,bearC,false)
+        ev = '{"direction":"bearish","type":"internal"}'
+        if sendEvt(sig, close, ev)
+            lastSignalName := sig
+    map.put(smallData,"downside",0)
+
+// === CLEANSE OBs ===
+cleanseOBs(arr, isHigh) =>
+    signalFired = false
+    if array.size(arr) > 0
+        for i = array.size(arr)-1 to 0
+            b = array.get(arr,i)
+            top = box.get_top(b)
+            bottom = box.get_bottom(b)
+            cond = isHigh? close>=top : close<=bottom
+            if cond
+                ev = '{"type":"'+(isHigh?"bear":"bull")+'","level":'+str.tostring(isHigh?top:bottom,'#.#####')+'}'
+                if sendEvt("OB_MITIGATED", close, ev)
+                    signalFired := true
+                box.delete(b)
+                array.remove(arr,i)
+        if array.size(arr)>maxOBs and maxOBs>0
+            OLD = array.pop(arr)
+            box.delete(OLD)
+    signalFired
+
+// Check for OB mitigations and update signal name
+if array.size(highBlock) > 0 and cleanseOBs(highBlock,true)
+    lastSignalName := "OB_MITIGATED"
+if array.size(lowBlock) > 0 and cleanseOBs(lowBlock,false)
+    lastSignalName := "OB_MITIGATED"
+
+// Update box extensions
+if array.size(highBlock) > 0
+    for b in highBlock
+        box.set_right(b, last_bar_index+5)
+if array.size(lowBlock) > 0
+    for b in lowBlock
+        box.set_right(b, last_bar_index+5)
+
+// === FVG DETECTION & MITIGATION ===
+detectFVG() =>
+    fvgFormed = false
+    if showFVG and bar_index >= 2
+        // Simple 3-candle FVG detection
+        candle1_up = close[2] > open[2]
+        candle2_up = close[1] > open[1]  
+        candle3_up = close > open
+        
+        // Bullish FVG: 3 consecutive up candles with gap
+        if candle1_up and candle2_up and candle3_up
+            if low[1] > high[2] // gap exists
+                gapTop = low[1]
+                gapBottom = high[2]
+                b = box.new(bar_index[1], gapTop, last_bar_index, gapTop, 
+                           border_color=color.new(fvgcol,fvgtra), bgcolor=color.new(fvgcol,fvgtra))
+                array.unshift(fvgDrawings, b)
+                if array.size(fvgDrawings) > maxOBs and maxOBs > 0
+                    old = array.pop(fvgDrawings)
+                    box.delete(old)
+                ev = '{"type":"bull","level":' + str.tostring(gapTop,'#.#####') + '}'
+                if sendEvt("FVG_FORMED", close, ev)
+                    fvgFormed := true
+        
+        // Bearish FVG: 3 consecutive down candles with gap  
+        else if not candle1_up and not candle2_up and not candle3_up
+            if high[1] < low[2] // gap exists
+                gapTop = low[2]
+                gapBottom = high[1]
+                b = box.new(bar_index[1], gapTop, last_bar_index, gapBottom,
+                           border_color=color.new(fvgcol,fvgtra), bgcolor=color.new(fvgcol,fvgtra))
+                array.unshift(fvgDrawings, b)
+                if array.size(fvgDrawings) > maxOBs and maxOBs > 0
+                    old = array.pop(fvgDrawings)
+                    box.delete(old)
+                ev = '{"type":"bear","level":' + str.tostring(gapBottom,'#.#####') + '}'
+                if sendEvt("FVG_FORMED", close, ev)
+                    fvgFormed := true
+    fvgFormed
+
+if detectFVG()
+    lastSignalName := "FVG_FORMED"
+
+// FVG Mitigation
+fvgMitigated = false
+if array.size(fvgDrawings) > 0
+    for i = array.size(fvgDrawings)-1 to 0
+        if i < array.size(fvgDrawings) and i >= 0
+            fg = array.get(fvgDrawings, i)
+            fgTop = box.get_top(fg)
+            fgBottom = box.get_bottom(fg)
+            bull = fgTop > fgBottom
+            
+            if (bull and low <= fgBottom) or (not bull and high >= fgTop)
+                ev = '{"type":"' + (bull?"bull":"bear") + '","level":' + str.tostring(bull?fgBottom:fgTop,'#.#####') + '}'
+                if sendEvt("FVG_MITIGATED", close, ev)
+                    fvgMitigated := true
+                box.delete(fg)
+                array.remove(fvgDrawings, i)
+            else if contract
+                if bull and low < fgTop
+                    box.set_top(fg, low)
+                else if not bull and high > fgBottom
+                    box.set_bottom(fg, high)
+
+if fvgMitigated
+    lastSignalName := "FVG_MITIGATED"
+
+// === KEY LEVELS ===
+checkKey() =>
+    keyHit = false
+    keySignal = ""
+    tol = close * (minDistance / 100)
+    if show1D and math.abs(close - pdHigh) <= tol
+        dir = close > pdHigh ? "above" : "below"
+        ev = '{"lvl":"PDH","dir":"' + dir + '","lvl_val":' + str.tostring(pdHigh,'#.#####') + '}'
+        if sendEvt("KEY_PDH", close, ev)
+            keyHit := true
+            keySignal := "KEY_PDH"
+    if show1D and math.abs(close - pdLow) <= tol
+        dir = close < pdLow ? "below" : "above"
+        ev = '{"lvl":"PDL","dir":"' + dir + '","lvl_val":' + str.tostring(pdLow,'#.#####') + '}'
+        if sendEvt("KEY_PDL", close, ev)
+            keyHit := true
+            keySignal := "KEY_PDL"
+    if show4H and math.abs(close - h4High) <= tol
+        dir = close > h4High ? "above" : "below" 
+        ev = '{"lvl":"4HH","dir":"' + dir + '","lvl_val":' + str.tostring(h4High,'#.#####') + '}'
+        if sendEvt("KEY_4HH", close, ev)
+            keyHit := true
+            keySignal := "KEY_4HH"
+    if show4H and math.abs(close - h4Low) <= tol
+        dir = close < h4Low ? "below" : "above"
+        ev = '{"lvl":"4HL","dir":"' + dir + '","lvl_val":' + str.tostring(h4Low,'#.#####') + '}'
+        if sendEvt("KEY_4HL", close, ev)
+            keyHit := true
+            keySignal := "KEY_4HL"
+    [keyHit, keySignal]
+
+[keyTriggered, keyName] = checkKey()
+if keyTriggered
+    lastSignalName := keyName
+
+// Plot levels
+plot(show1D?pdHigh:na, color=color.red, linewidth=2, title="PDH")
+plot(show1D?pdLow :na, color=color.green,linewidth=2, title="PDL")
+plot(show4H?h4High:na, color=color.orange,linewidth=1, title="4H High")
+plot(show4H?h4Low :na, color=color.yellow,linewidth=1, title="4H Low")
+
+// Status table
+var table st = table.new(position.top_right, 2, 3, bgcolor=#1e1e1e)
+if barstate.islast
+    table.cell(st,0,0,"Last Signal", text_color=color.white)
+    table.cell(st,1,0,lastSignalName, text_color=color.yellow)
+    table.cell(st,0,1,"Active OBs/FVGs", text_color=color.white)
+    table.cell(st,1,1,str.tostring(array.size(highBlock)+array.size(lowBlock))+'/'+str.tostring(array.size(fvgDrawings)), text_color=color.white)
+    table.cell(st,0,2,"Session", text_color=color.white)
+    table.cell(st,1,2,session, text_color=color.white)
