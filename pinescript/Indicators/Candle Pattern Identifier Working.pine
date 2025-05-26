@@ -1,0 +1,462 @@
+//@version=5
+indicator("Candle Pattern Identifier", overlay=true)
+// ==================== HELPER FUNCTIONS ====================
+
+// Calculate candle body size
+bodySize(index) => math.abs(close[index] - open[index])
+
+// Calculate candle wick sizes
+upperWick(index) => high[index] - math.max(close[index], open[index])
+lowerWick(index) => math.min(close[index], open[index]) - low[index]
+
+// Check if candle is bullish or bearish
+isBullish(index) => close[index] > open[index]
+isBearish(index) => close[index] < open[index]
+
+// Check relative sizes
+isLargeBody(index) =>
+    avgBodySize = 0.0
+    for i = 0 to 19
+        avgBodySize := avgBodySize + bodySize(index + i)
+    avgBodySize := avgBodySize / 20
+    bodySize(index) > avgBodySize * 1.2
+
+isSmallBody(index) =>
+    avgBodySize = 0.0
+    for i = 0 to 19
+        avgBodySize := avgBodySize + bodySize(index + i)
+    avgBodySize := avgBodySize / 20
+    bodySize(index) < avgBodySize * 0.8
+
+// ==================== SINGLE CANDLE PATTERNS ====================
+
+// Hammer
+isHammer(index) =>
+    isBullish(index) and    lowerWick(index) >= bodySize(index) * 2 and    upperWick(index) <= bodySize(index) * 0.2 and    bodySize(index) > 0
+
+// Inverted Hammer
+isInvertedHammer(index) =>
+    isBullish(index) and    upperWick(index) >= bodySize(index) * 2 and    lowerWick(index) <= bodySize(index) * 0.2 and    bodySize(index) > 0
+
+// Dragonfly Doji
+isDragonflyDoji(index) =>
+    bodySize(index) <= (high[index] - low[index]) * 0.05 and upperWick(index) <= (high[index] - low[index]) * 0.05 and lowerWick(index) >= (high[index] - low[index]) * 0.65
+
+// Gravestone Doji
+isGravestoneDoji(index) =>
+    bodySize(index) <= (high[index] - low[index]) * 0.05 and upperWick(index) >= (high[index] - low[index]) * 0.65 and lowerWick(index) <= (high[index] - low[index]) * 0.05
+
+// Bullish Spinning Top
+isBullishSpinningTop(index) =>
+    isBullish(index) and    isSmallBody(index) and    upperWick(index) >= bodySize(index) * 1.1 and    lowerWick(index) >= bodySize(index) * 1.1
+
+// Spinning Top
+isSpinningTop(index) =>
+    isSmallBody(index) and    upperWick(index) >= bodySize(index) * 1.1 and    lowerWick(index) >= bodySize(index) * 1.1 and    not isDragonflyDoji(index) and    not isGravestoneDoji(index)
+
+// Doji
+isDoji(index) =>
+    math.abs(close[index] - open[index]) <= (high[index] - low[index]) * 0.05 and    not isDragonflyDoji(index) and    not isGravestoneDoji(index)
+
+// Hanging Man
+isHangingMan(index) =>
+    isBearish(index) and    lowerWick(index) >= bodySize(index) * 2 and    upperWick(index) <= bodySize(index) * 0.2 and    bodySize(index) > 0
+
+// Shooting Star
+isShootingStar(index) =>
+    isBearish(index) and    upperWick(index) >= bodySize(index) * 2 and    lowerWick(index) <= bodySize(index) * 0.2 and    bodySize(index) > 0
+
+// Bearish Spinning Top
+isBearishSpinningTop(index) =>
+    isBearish(index) and    isSmallBody(index) and    upperWick(index) >= bodySize(index) * 1.1 and    lowerWick(index) >= bodySize(index) * 1.1
+
+// Marubozu
+isMarubozu(index) =>
+    isLargeBody(index) and    upperWick(index) < bodySize(index) * 0.05 and    lowerWick(index) < bodySize(index) * 0.05
+
+// ==================== DOUBLE CANDLE PATTERNS ====================
+
+// Harami
+isHarami(index) =>
+    bodySize(index) < bodySize(index+1) * 0.5 and    math.max(open[index], close[index]) < math.max(open[index+1], close[index+1]) and    math.min(open[index], close[index]) > math.min(open[index+1], close[index+1])
+
+// Bullish Kicker
+isBullishKicker(index) =>
+    isBearish(index+1) and    isBullish(index) and    open[index] > open[index+1] and    open[index] > close[index+1]
+
+// Bullish Engulfing
+isBullishEngulfing(index) =>
+    isBearish(index+1) and    isBullish(index) and    close[index] > open[index+1] and    open[index] < close[index+1] and    bodySize(index) > bodySize(index+1)
+
+// Piercing Line
+isPiercingLine(index) =>
+    isBearish(index+1) and    isBullish(index) and    open[index] < close[index+1] and    close[index] > close[index+1] + bodySize(index+1) * 0.5 and    close[index] < open[index+1]
+
+// Bullish Harami
+isBullishHarami(index) =>
+    isBearish(index+1) and    isBullish(index) and    isHarami(index)
+
+// Tweezer Bottom
+isTweezerBottom(index) =>
+    isBearish(index+1) and    isBullish(index) and    math.abs(low[index] - low[index+1]) <= math.max(high[index] - low[index], high[index+1] - low[index+1]) * 0.05
+
+// Bearish Engulfing
+isBearishEngulfing(index) =>
+    isBullish(index+1) and    isBearish(index) and    close[index] < open[index+1] and    open[index] > close[index+1] and    bodySize(index) > bodySize(index+1)
+
+// Bearish Kicker
+isBearishKicker(index) =>
+    isBullish(index+1) and    isBearish(index) and    open[index] < open[index+1] and    open[index] < close[index+1]
+
+// Dark Cloud Cover
+isDarkCloudCover(index) =>
+    isBullish(index+1) and    isBearish(index) and    open[index] > close[index+1] and    close[index] < open[index+1] + bodySize(index+1) * 0.5 and    close[index] > open[index+1]
+
+// Bearish Harami
+isBearishHarami(index) =>
+    isBullish(index+1) and    isBearish(index) and    isHarami(index)
+
+// Tweezer Top
+isTweezerTop(index) =>
+    isBullish(index+1) and    isBearish(index) and    math.abs(high[index] - high[index+1]) <= math.max(high[index] - low[index], high[index+1] - low[index+1]) * 0.05
+
+// ==================== TRIPLE CANDLE PATTERNS (Safe) ====================
+
+// Morning Star
+isMorningStar(index) =>
+    if index < 2
+        false
+    else
+        isBearish(index - 2) and        bodySize(index - 1) < bodySize(index - 2) * 0.7 and        bodySize(index - 1) < bodySize(index) * 0.7 and        isBullish(index) and        close[index] > (open[index - 2] + close[index - 2]) / 2
+
+// Evening Star
+isEveningStar(index) =>
+    if index < 2
+        false
+    else
+        isBullish(index - 2) and        bodySize(index - 1) < bodySize(index - 2) * 0.7 and        bodySize(index - 1) < bodySize(index) * 0.7 and        isBearish(index) and        close[index] < (open[index - 2] + close[index - 2]) / 2
+
+// Three White Soldiers
+isThreeWhiteSoldiers(index) =>
+    if index < 2
+        false
+    else
+        isBullish(index) and isBullish(index - 1) and isBullish(index - 2) and        close[index] > close[index - 1] and        close[index - 1] > close[index - 2] and        open[index] > open[index - 1] and        open[index - 1] > open[index - 2] and        upperWick(index) < bodySize(index) * 0.5 and        upperWick(index - 1) < bodySize(index - 1) * 0.5 and        upperWick(index - 2) < bodySize(index - 2) * 0.5
+
+// Three Black Crows
+isThreeBlackCrows(index) =>
+    if index < 2
+        false
+    else
+        isBearish(index) and isBearish(index - 1) and isBearish(index - 2) and        close[index] < close[index - 1] and        close[index - 1] < close[index - 2] and        open[index] < open[index - 1] and        open[index - 1] < open[index - 2] and        lowerWick(index) < bodySize(index) * 0.5 and        lowerWick(index - 1) < bodySize(index - 1) * 0.5 and        lowerWick(index - 2) < bodySize(index - 2) * 0.5
+
+// Morning Doji Star
+isMorningDojiStar(index) =>
+    if index < 2
+        false
+    else
+        isBearish(index - 2) and        isDoji(index - 1) and        isBullish(index) and        close[index - 1] < close[index - 2] and        open[index - 1] < close[index - 2] and        open[index] > close[index - 1] and        close[index] > open[index - 2]
+
+// Evening Doji Star
+isEveningDojiStar(index) =>
+    if index < 2
+        false
+    else
+        isBullish(index - 2) and        isDoji(index - 1) and        isBearish(index) and        close[index - 1] > close[index - 2] and        open[index - 1] > close[index - 2] and        open[index] < close[index - 1] and        close[index] < open[index - 2]
+
+// Bullish Abandoned Baby
+isBullishAbandonedBaby(index) =>
+    if index < 2
+        false
+    else
+        isBearish(index - 2) and        isDoji(index - 1) and        isBullish(index) and        high[index - 1] < low[index - 2] and        low[index - 1] > high[index]
+
+// Bearish Abandoned Baby
+isBearishAbandonedBaby(index) =>
+    if index < 2
+        false
+    else
+        isBullish(index - 2) and        isDoji(index - 1) and        isBearish(index) and        low[index - 1] > high[index - 2] and        high[index - 1] < low[index]
+
+// Bullish Engulfing Sandwich
+isBullishEngulfingSandwich(index) =>
+    if index < 2
+        false
+    else
+        isBearish(index - 2) and        isBullish(index - 1) and        isBullish(index) and        bodySize(index - 1) < bodySize(index - 2) * 0.5 and        bodySize(index - 1) < bodySize(index) * 0.5 and        isBullishEngulfing(index)
+
+// Bearish Engulfing Sandwich
+isBearishEngulfingSandwich(index) =>
+    if index < 2
+        false
+    else
+        isBullish(index - 2) and        isBearish(index - 1) and        isBearish(index) and        bodySize(index - 1) < bodySize(index - 2) * 0.5 and        bodySize(index - 1) < bodySize(index) * 0.5 and        isBearishEngulfing(index)
+
+// Rising Three
+isRisingThree(index) =>
+    if index < 4
+        false
+    else
+        isBullish(index - 4) and        isBullish(index) and        bodySize(index) > bodySize(index - 1) * 1.5 and        bodySize(index) > bodySize(index - 2) * 1.5 and        bodySize(index) > bodySize(index - 3) * 1.5 and        high[index] < high[index - 4] and        low[index] > low[index - 4]
+
+// Falling Three
+isFallingThree(index) =>
+    if index < 4
+        false
+    else
+        isBearish(index - 4) and        isBearish(index) and        bodySize(index) > bodySize(index - 1) * 1.5 and        bodySize(index) > bodySize(index - 2) * 1.5 and        bodySize(index) > bodySize(index - 3) * 1.5 and        low[index] > low[index - 4] and        high[index] < high[index - 4]
+
+// ==================== PATTERN STRENGTH EVALUATIONS ====================
+
+// Function to evaluate signal strength (0.0 to 1.0)
+getPatternStrength(patternName) =>
+    strength = 0.0
+    
+    // Assign strength values to patterns (0.0 to 1.0 - higher is stronger)
+    if patternName == "Hammer" or patternName == "Hanging Man"
+        strength := 0.6
+    else if patternName == "Inverted Hammer" or patternName == "Shooting Star"
+        strength := 0.5
+    else if patternName == "Dragonfly Doji" or patternName == "Gravestone Doji"
+        strength := 0.7
+    else if patternName == "Bullish Spinning Top" or patternName == "Bearish Spinning Top"
+        strength := 0.3
+    else if patternName == "Spinning Top"
+        strength := 0.2
+    else if patternName == "Doji"
+        strength := 0.4
+    else if patternName == "Harami"
+        strength := 0.5
+    else if patternName == "Marubozu"
+        strength := 0.8
+    else if patternName == "Bullish Kicker" or patternName == "Bearish Kicker"
+        strength := 0.9
+    else if patternName == "Bullish Engulfing" or patternName == "Bearish Engulfing"
+        strength := 0.8
+    else if patternName == "Piercing Line" or patternName == "Dark Cloud Cover"
+        strength := 0.7
+    else if patternName == "Bullish Harami" or patternName == "Bearish Harami"
+        strength := 0.6
+    else if patternName == "Tweezer Bottom" or patternName == "Tweezer Top"
+        strength := 0.6
+    else if patternName == "Morning Doji Star" or patternName == "Evening Doji Star"
+        strength := 0.9
+    else if patternName == "Three White Soldiers" or patternName == "Three Black Crows"
+        strength := 1.0
+    else if patternName == "Bullish Engulfing Sandwich" or patternName == "Bearish Engulfing Sandwich"
+        strength := 0.9
+    else if patternName == "Bullish Abandoned Baby" or patternName == "Bearish Abandoned Baby"
+        strength := 0.95
+    else if patternName == "Morning Star" or patternName == "Evening Star"
+        strength := 0.85
+    else if patternName == "Rising Three" or patternName == "Falling Three"
+        strength := 0.8
+
+// Function to get strongest pattern from a comma-separated list
+getStrongestPattern(patternList) =>
+    if patternList == "" or patternList == "None"
+        [0.0, ""]
+    else
+        patterns = str.split(patternList, ", ")
+        maxStrength = 0.0
+        strongestPattern = ""
+    
+        for i = 0 to array.size(patterns) - 1
+            pattern = array.get(patterns, i)
+            strength = getPatternStrength(pattern)
+            if strength > maxStrength
+                maxStrength := strength
+                strongestPattern := pattern
+        
+        [maxStrength, strongestPattern]
+
+// Function to calculate color based on strength
+getBullishColor(strength) =>
+// Blend from light green to dark green based on strength
+    r = 230 - 179 * strength  // 230 to 51
+    g = 243 - 48 * strength   // 243 to 195
+    b = 230 - 165 * strength  // 230 to 65
+    color.rgb(math.round(r), math.round(g), math.round(b))
+
+getBearishColor(strength) =>
+// Blend from light red to dark red based on strength
+    r = 249 - 48 * strength   // 249 to 201
+    g = 230 - 172 * strength  // 230 to 58
+    b = 230 - 172 * strength  // 230 to 58
+    color.rgb(math.round(r), math.round(g), math.round(b))
+
+getNeutralColor() =>
+    color.rgb(237, 237, 237)  
+
+// Light gray
+// ==================== DETECTION FOR LAST CANDLE ====================
+// --- SINGLE CANDLE PATTERNS ---
+// BULLISH
+hammer = isHammer(1) ? "Hammer" : ""
+invHammer = isInvertedHammer(1) ? "Inverted Hammer" : ""
+dragonflyDoji = isDragonflyDoji(1) ? "Dragonfly Doji" : ""
+bullSpinTop = isBullishSpinningTop(1) ? "Bullish Spinning Top" : ""
+// NEUTRAL
+spinTop = isSpinningTop(1) ? "Spinning Top" : ""
+doji = isDoji(1) ? "Doji" : ""
+harami = isHarami(1) ? "Harami" : ""
+marubozu = isMarubozu(1) ? "Marubozu" : ""
+// BEARISH
+hangingMan = isHangingMan(1) ? "Hanging Man" : ""
+shootingStar = isShootingStar(1) ? "Shooting Star" : ""
+gravestoneDoji = isGravestoneDoji(1) ? "Gravestone Doji" : ""
+bearSpinTop = isBearishSpinningTop(1) ? "Bearish Spinning Top" : ""
+// --- DOUBLE CANDLE PATTERNS ---
+// BULLISH
+bullKicker = isBullishKicker(1) ? "Bullish Kicker" : ""
+bullEngulfing = isBullishEngulfing(1) ? "Bullish Engulfing" : ""
+piercingLine = isPiercingLine(1) ? "Piercing Line" : ""
+bullHarami = isBullishHarami(1) ? "Bullish Harami" : ""
+tweezerBottom = isTweezerBottom(1) ? "Tweezer Bottom" : ""
+// BEARISH
+bearEngulfing = isBearishEngulfing(1) ? "Bearish Engulfing" : ""
+bearKicker = isBearishKicker(1) ? "Bearish Kicker" : ""
+darkCloud = isDarkCloudCover(1) ? "Dark Cloud Cover" : ""
+bearHarami = isBearishHarami(1) ? "Bearish Harami" : ""
+tweezerTop = isTweezerTop(1) ? "Tweezer Top" : ""
+// --- TRIPLE CANDLE PATTERNS ---
+// BULLISH
+morningDojiStar = isMorningDojiStar(1) ? "Morning Doji Star" : ""
+threeWhiteSoldiers = isThreeWhiteSoldiers(1) ? "Three White Soldiers" : ""
+bullEngulfingSandwich = isBullishEngulfingSandwich(1) ? "Bullish Engulfing Sandwich" : ""
+bullAbandonedBaby = isBullishAbandonedBaby(1) ? "Bullish Abandoned Baby" : ""
+morningStar = isMorningStar(1) ? "Morning Star" : ""
+risingThree = isRisingThree(1) ? "Rising Three" : ""
+
+// BEARISH
+eveningDojiStar = isEveningDojiStar(1) ? "Evening Doji Star" : ""
+threeBlackCrows = isThreeBlackCrows(1) ? "Three Black Crows" : ""
+bearEngulfingSandwich = isBearishEngulfingSandwich(1) ? "Bearish Engulfing Sandwich" : ""
+bearAbandonedBaby = isBearishAbandonedBaby(1) ? "Bearish Abandoned Baby" : ""
+eveningStar = isEveningStar(1) ? "Evening Star" : ""
+fallingThree = isFallingThree(1) ? "Falling Three" : ""
+
+
+// ==================== TABLE DISPLAY ====================
+var table t = table.new(position.top_center, 3, 4, border_width=2)
+
+// Add headers
+if barstate.isconfirmed
+    table.cell(t, 0, 0, "BULLISH", bgcolor=#8FBC8F, text_color=color.black, text_size=size.small, width=18)
+    table.cell(t, 1, 0, "NEUTRAL", bgcolor=#A9A9A9, text_color=color.black, text_size=size.small, width=18)
+    table.cell(t, 2, 0, "BEARISH", bgcolor=#F08080, text_color=color.black, text_size=size.small, width=18)
+
+
+// ROW 1: Single candle patterns
+bull_single = ""
+bull_single := bull_single + hammer
+bull_single := bull_single + (hammer != "" and invHammer != "" ? ", " : "") + invHammer
+bull_single := bull_single + ((hammer != "" or invHammer != "") and dragonflyDoji != "" ? ", " : "") + dragonflyDoji
+bull_single := bull_single + ((hammer != "" or invHammer != "" or dragonflyDoji != "") and bullSpinTop != "" ? ", " : "") + bullSpinTop
+
+neutral_single = ""
+neutral_single := neutral_single + spinTop
+neutral_single := neutral_single + (spinTop != "" and doji != "" ? ", " : "") + doji
+neutral_single := neutral_single + ((spinTop != "" or doji != "") and harami != "" ? ", " : "") + harami
+neutral_single := neutral_single + ((spinTop != "" or doji != "" or harami != "") and marubozu != "" ? ", " : "") + marubozu
+
+bear_single = ""
+bear_single := bear_single + hangingMan
+bear_single := bear_single + (hangingMan != "" and shootingStar != "" ? ", " : "") + shootingStar
+bear_single := bear_single + ((hangingMan != "" or shootingStar != "") and gravestoneDoji != "" ? ", " : "") + gravestoneDoji
+bear_single := bear_single + ((hangingMan != "" or shootingStar != "" or gravestoneDoji != "") and bearSpinTop != "" ? ", " : "") + bearSpinTop
+
+// Get strongest pattern for coloring
+[bull_single_strength, bull_single_strongest] = getStrongestPattern(bull_single != "" ? bull_single : "None")
+[bear_single_strength, bear_single_strongest] = getStrongestPattern(bear_single != "" ? bear_single : "None")
+
+table.cell(t, 0, 1, bull_single != "" ? bull_single : "None", 
+           bgcolor=bull_single != "" ? getBullishColor(bull_single_strength) : color.rgb(240, 240, 240), 
+           text_color=color.black, text_size=size.small)
+table.cell(t, 1, 1, neutral_single != "" ? neutral_single : "None", 
+           bgcolor=getNeutralColor(), 
+           text_color=color.black, text_size=size.small)
+table.cell(t, 2, 1, bear_single != "" ? bear_single : "None", 
+           bgcolor=bear_single != "" ? getBearishColor(bear_single_strength) : color.rgb(240, 240, 240), 
+           text_color=color.black, text_size=size.small)
+
+// ROW 2: Double candle patterns
+bull_double = ""
+bull_double := bull_double + bullKicker
+bull_double := bull_double + (bullKicker != "" and bullEngulfing != "" ? ", " : "") + bullEngulfing
+bull_double := bull_double + ((bullKicker != "" or bullEngulfing != "") and piercingLine != "" ? ", " : "") + piercingLine
+bull_double := bull_double + ((bullKicker != "" or bullEngulfing != "" or piercingLine != "") and bullHarami != "" ? ", " : "") + bullHarami
+bull_double := bull_double + ((bullKicker != "" or bullEngulfing != "" or piercingLine != "" or bullHarami != "") and tweezerBottom != "" ? ", " : "") + tweezerBottom
+
+bear_double = ""
+bear_double := bear_double + bearEngulfing
+bear_double := bear_double + (bearEngulfing != "" and bearKicker != "" ? ", " : "") + bearKicker
+bear_double := bear_double + ((bearEngulfing != "" or bearKicker != "") and darkCloud != "" ? ", " : "") + darkCloud
+bear_double := bear_double + ((bearEngulfing != "" or bearKicker != "" or darkCloud != "") and bearHarami != "" ? ", " : "") + bearHarami
+bear_double := bear_double + ((bearEngulfing != "" or bearKicker != "" or darkCloud != "" or bearHarami != "") and tweezerTop != "" ? ", " : "") + tweezerTop
+
+// Get strongest pattern for coloring
+[bull_double_strength, bull_double_strongest] = getStrongestPattern(bull_double != "" ? bull_double : "None")
+[bear_double_strength, bear_double_strongest] = getStrongestPattern(bear_double != "" ? bear_double : "None")
+
+table.cell(t, 0, 2, bull_double != "" ? bull_double : "None", 
+           bgcolor=bull_double != "" ? getBullishColor(bull_double_strength) : color.rgb(240, 240, 240), 
+           text_color=color.black, text_size=size.small)
+table.cell(t, 1, 2, "None", 
+           bgcolor=getNeutralColor(), 
+           text_color=color.black, text_size=size.small)
+table.cell(t, 2, 2, bear_double != "" ? bear_double : "None", 
+           bgcolor=bear_double != "" ? getBearishColor(bear_double_strength) : color.rgb(240, 240, 240), 
+           text_color=color.black, text_size=size.small)
+
+// ROW 3: Triple candle patterns
+bull_triple = ""
+bull_triple := bull_triple + morningDojiStar
+bull_triple := bull_triple + (morningDojiStar != "" and threeWhiteSoldiers != "" ? ", " : "") + threeWhiteSoldiers
+bull_triple := bull_triple + ((morningDojiStar != "" or threeWhiteSoldiers != "") and bullEngulfingSandwich != "" ? ", " : "") + bullEngulfingSandwich
+bull_triple := bull_triple + ((morningDojiStar != "" or threeWhiteSoldiers != "" or bullEngulfingSandwich != "") and bullAbandonedBaby != "" ? ", " : "") + bullAbandonedBaby
+bull_triple := bull_triple + ((morningDojiStar != "" or threeWhiteSoldiers != "" or bullEngulfingSandwich != "" or bullAbandonedBaby != "") and morningStar != "" ? ", " : "") + morningStar
+bull_triple := bull_triple + ((morningDojiStar != "" or threeWhiteSoldiers != "" or bullEngulfingSandwich != "" or bullAbandonedBaby != "" or morningStar != "") and risingThree != "" ? ", " : "") + risingThree
+
+bear_triple = ""
+bear_triple := bear_triple + eveningDojiStar
+bear_triple := bear_triple + (eveningDojiStar != "" and threeBlackCrows != "" ? ", " : "") + threeBlackCrows
+bear_triple := bear_triple + ((eveningDojiStar != "" or threeBlackCrows != "") and bearEngulfingSandwich != "" ? ", " : "") + bearEngulfingSandwich
+bear_triple := bear_triple + ((eveningDojiStar != "" or threeBlackCrows != "" or bearEngulfingSandwich != "") and bearAbandonedBaby != "" ? ", " : "") + bearAbandonedBaby
+bear_triple := bear_triple + ((eveningDojiStar != "" or threeBlackCrows != "" or bearEngulfingSandwich != "" or bearAbandonedBaby != "") and eveningStar != "" ? ", " : "") + eveningStar
+bear_triple := bear_triple + ((eveningDojiStar != "" or threeBlackCrows != "" or bearEngulfingSandwich != "" or bearAbandonedBaby != "" or eveningStar != "") and fallingThree != "" ? ", " : "") + fallingThree
+
+// Get strongest pattern for coloring
+[bull_triple_strength, bull_triple_strongest] = getStrongestPattern(bull_triple != "" ? bull_triple : "None")
+[bear_triple_strength, bear_triple_strongest] = getStrongestPattern(bear_triple != "" ? bear_triple : "None")
+
+table.cell(t, 0, 3, bull_triple != "" ? bull_triple : "None", 
+           bgcolor=bull_triple != "" ? getBullishColor(bull_triple_strength) : color.rgb(240, 240, 240), 
+           text_color=color.black, text_size=size.small)
+table.cell(t, 1, 3, "None", 
+           bgcolor=getNeutralColor(), 
+           text_color=color.black, text_size=size.small)
+table.cell(t, 2, 3, bear_triple != "" ? bear_triple : "None", 
+           bgcolor=bear_triple != "" ? getBearishColor(bear_triple_strength) : color.rgb(240, 240, 240), 
+           text_color=color.black, text_size=size.small)
+           
+// === PLOT PATTERN LABELS FOR EVALUATOR ===
+if barstate.isconfirmed
+    if bull_single_strongest != ""
+        label.new(bar_index -1, low[1], text="Pattern: " + bull_single_strongest, style=label.style_label_up, textcolor=color.white, color=color.green, size=size.small)
+    if bear_single_strongest != ""
+        label.new(bar_index -1, high[1], text="Pattern: " + bear_single_strongest, style=label.style_label_down, textcolor=color.white, color=color.red, size=size.small)
+    
+    if bull_double_strongest != ""
+        label.new(bar_index -1, low[1], text="Pattern: " + bull_double_strongest, style=label.style_label_up, textcolor=color.white, color=color.green, size=size.small)
+    if bear_double_strongest != ""
+        label.new(bar_index -1, high[1], text="Pattern: " + bear_double_strongest, style=label.style_label_down, textcolor=color.white, color=color.red, size=size.small)
+
+    if bull_triple_strongest != ""
+        label.new(bar_index -1, low[1], text="Pattern: " + bull_triple_strongest, style=label.style_label_up, textcolor=color.white, color=color.green, size=size.small)
+    if bear_triple_strongest != ""
+        label.new(bar_index -1, high[1], text="Pattern: " + bear_triple_strongest, style=label.style_label_down, textcolor=color.white, color=color.red, size=size.small)
+
+plot(close, color=color.white, display=display.none)
+
+

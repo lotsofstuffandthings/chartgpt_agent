@@ -1,0 +1,6 @@
+"timestamp", "price", "rsi", "ema9", "ema21", "vwap", "bb_mid", "macd_hist",
+                    "volume_osc", "atr", "bb_width", "session_range",
+                    "c1_open", "c1_high", "c1_low", "c1_close",
+                    "c2_open", "c2_high", "c2_low", "c2_close",
+                    "c3_open", "c3_high", "c3_low", "c3_close",
+                    "decision", "confidence", "entry_price", "stop_loss", "take_profit", "reasoning", "raw_gpt_response"
